@@ -1,0 +1,30 @@
+{
+  "name": "codex-cosmic",
+  "version": "0.1.0+codex.20260911021952",
+  "description": "A visual workspace for UI prototypes, project templates, image assets, and Three.js scenes.",
+  "author": {
+    "name": "Sxholar"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Cosmic",
+    "shortDescription": "Design UI and 3D scenes with Codex.",
+    "longDescription": "An editable UI and Three.js studio with saved projects, native prototype controls, image assets, real Codex design runs, persistent activity and live asset arrivals. Runs locally using your own Codex account.",
+    "developerName": "Sxholar",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Open my Codex Cosmic studio.",
+      "Design a UI using my references.",
+      "Review my selected design and improve it."
+    ],
+    "brandColor": "#AAA7C2",
+    "composerIcon": "./assets/cosmic.svg",
+    "logo": "./assets/cosmic.svg",
+    "logoDark": "./assets/cosmic.svg"
+  },
+  "mcpServers": "./.mcp.json"
+}

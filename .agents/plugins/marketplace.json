@@ -1,0 +1,20 @@
+{
+  "name": "cosmic",
+  "interface": {
+    "displayName": "Cosmic"
+  },
+  "plugins": [
+    {
+      "name": "codex-cosmic",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-cosmic"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

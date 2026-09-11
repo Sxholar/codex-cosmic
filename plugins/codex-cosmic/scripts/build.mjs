@@ -1,0 +1,12 @@
+import {prototypeStyles} from '../src/prototype.mjs';
+import { build } from 'esbuild';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+const root=fileURLToPath(new URL('../',import.meta.url));
+await mkdir(root+'dist',{recursive:true});
+const result=await build({entryPoints:[root+'src/app.js'],bundle:true,write:false,format:'iife',target:'es2022',minify:true});
+const html=await readFile(root+'src/index.html','utf8');
+const logo=await readFile(root+'assets/cosmic.svg','utf8');
+const css=(await readFile(root+'src/style.css','utf8'))+'\n'+(await readFile(root+'src/home.css','utf8'))+'\n'+(await readFile(root+'src/chrome.css','utf8'))+'\n'+(await readFile(root+'src/activity.css','utf8'))+'\n'+prototypeStyles;
+await writeFile(root+'dist/index.html',html.replaceAll('<!-- OPENAI_LOGO -->',()=>logo).replace('/* STUDIO_CSS */',()=>css).replace('/* STUDIO_JS */',()=>result.outputFiles[0].text.replaceAll('</script','<\\/script')));
+console.log('Built self-contained design editor.');
