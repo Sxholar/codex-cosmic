@@ -1,5 +1,7 @@
 # Codex Cosmic
 
+Published by **Haki**. [Privacy policy](https://github.com/Sxholar/codex-cosmic/blob/main/PRIVACY.md) · [Terms](https://github.com/Sxholar/codex-cosmic/blob/main/TERMS.md) · [Support](mailto:sxholarr@gmail.com)
+
 A local visual studio for designing editable interfaces with Codex. Build pages and Three.js scenes, generate artwork through your Codex conversation, and try real buttons, inputs, sliders and navigation in Preview.
 
 ## Install in Codex

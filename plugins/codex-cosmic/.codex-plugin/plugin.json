@@ -1,16 +1,16 @@
 {
   "name": "codex-cosmic",
-  "version": "0.1.0+codex.20260912093935",
+  "version": "0.1.0+codex.20260912161838",
   "description": "A visual workspace for UI prototypes, project templates, image assets, and Three.js scenes.",
   "author": {
-    "name": "Sxholar"
+    "name": "Haki"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Cosmic",
     "shortDescription": "Design UI and 3D scenes with Codex.",
     "longDescription": "An editable UI and Three.js studio with saved projects, native prototype controls, image assets, real Codex design runs, persistent activity and live asset arrivals. Runs locally using your own Codex account.",
-    "developerName": "Sxholar",
+    "developerName": "Haki",
     "category": "Productivity",
     "capabilities": [
       "Interactive",
