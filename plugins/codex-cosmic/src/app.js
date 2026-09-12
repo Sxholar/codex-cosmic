@@ -4,13 +4,15 @@ import {assetDesignRequest} from './asset-workflow.mjs';
 import {createPrototypeRuntime} from './prototype.mjs';
 import {createSceneEditor} from './scene.js';
 import {createHome} from './home.js';
+import {fromTemplate} from './templates.mjs';
 import { App } from '@modelcontextprotocol/ext-apps';
 import { createDemo,validateDocument,applyOperations,layerSchema,layerStyle,exportHtml,escapeHtml } from './model.mjs';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)], esc=escapeHtml;
-let doc=createDemo(), boardId=doc.boards[0].id, selected=[], zoom=.65, mode='edit', tab='design', assetRole='asset',bridge=null,connected=false,saving=false,pending=[],gesture=null,undo=[],redo=[],pollBusy=false,activeJob=null,toastTimer;
+let submitError='';
+let doc=fromTemplate('blank'), boardId=doc.boards[0].id, selected=[], zoom=.65, mode='edit', tab='design', assetRole='asset',bridge=null,connected=false,saving=false,pending=[],gesture=null,undo=[],redo=[],pollBusy=false,activeJob=null,toastTimer;
 const prototype=createPrototypeRuntime({onNavigate:id=>{boardId=id;selected=[];render();fit();},onNotice:message=>toast(message)});
 const id=()=>crypto.randomUUID();
-let home,sceneEditor,jobChecking=false,submitting=false,lastCompleted=null,arriving=new Set();
+let home,sceneEditor,jobChecking=false,submitting=false,lastCompleted=null,arriving=new Set(),draftVersion=0,draftRun=null,draftVisible=false,lastRun=null,dragFrame=null,dragEvent=null;
 const activityView=createActivityView({onActivity:()=>switchTab('activity'),onAsset:assetId=>{switchTab('assets');document.querySelector('[data-asset="'+CSS.escape(assetId)+'"]')?.click();}});
 const isScene=()=>doc.kind==='scene';
 const currentBoard=()=>doc.boards.find(b=>b.id===boardId)||doc.boards[0];
@@ -20,13 +22,14 @@ function toast(t,action){const el=$('#toast');el.textContent=t;if(action){const 
 function dialog(title,html){$('#dialog-title').textContent=title;$('#dialog-content').innerHTML=html;$('#dialog').showModal();}
 function error(e){console.error(e);toast(e.message||String(e));}
 async function api(name,args={}){
- if(!['list_projects','create_project','open_project','rename_project','trash_project','save_template','delete_template','get_design_run','cancel_design_run'].includes(name))args={projectId:doc.projectId,...args};
+ if(!['list_projects','create_project','open_project','rename_project','trash_project','save_template','delete_template','get_design_run','get_design_run_preview','cancel_design_run'].includes(name))args={projectId:doc.projectId,...args};
  if(bridge){const r=await bridge.callServerTool({name,arguments:args});if(r.isError)throw Error(r.content?.find(c=>c.type==='text')?.text||'Tool failed');return r.structuredContent;}
  const r=await fetch('/api/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,arguments:args})});const result=await r.json();if(!r.ok){const e=Error(result.error);e.code=result.code;throw e;}return result;
 }
 function acceptDocument(next){doc=validateDocument(next);if(!doc.boards.some(b=>b.id===boardId))boardId=doc.boards[0].id;selected=selected.filter(s=>doc.layers.some(l=>l.id===s));render();}
 function remember(){undo.push(structuredClone(doc));if(undo.length>40)undo.shift();redo=[];}
 function commit(ops,{history=true}={}){
+ if(activeJob){toast("Stop generation before editing the canvas.");return;}
  try{const next=applyOperations(doc,ops);if(history)remember();doc=next;pending.push(...ops);render();drain();}catch(e){error(e);}
 }
 async function drain(){
@@ -38,7 +41,7 @@ async function drain(){
 async function flush(){while(saving||pending.length){if(pending.length&&!saving)await drain();await new Promise(r=>setTimeout(r,40));}}
 function select(ids){if(isScene()){sceneEditor?.select(ids[0]||null);return;}selected=ids;renderCanvas();renderLayers();renderProperties();$('#selection-note').textContent=selected.length?`${selected.length===1?currentLayer()?.name:selected.length+' elements'} selected`:'Whole canvas';if(bridge)bridge.updateModelContext({content:[{type:'text',text:JSON.stringify({selectedLayerIds:selected,boardId,project:doc.name})}]}).catch(()=>{});}
 function render(){$('#project-skills-count').textContent=doc.designSkills.length?' '+doc.designSkills.length:'';if(!isTyping())$('#project-name').value=doc.name;document.body.classList.toggle('scene-mode',isScene());$('#pages-label').textContent=isScene()?'Objects':'Pages';$('#viewport').hidden=isScene();$('#scene-toolbar').hidden=!isScene();if(isScene()){sceneEditor?.update(doc.scene);$('#board-size').textContent=doc.scene.objects.length+' objects';$('#canvas-hint').textContent='Drag to orbit · scroll to zoom · select an object to transform';}else{sceneEditor?.hide();renderBoards();renderLayers();renderCanvas();renderProperties();}renderAssets();renderReviews();$('#undo').disabled=!undo.length;$('#redo').disabled=!redo.length;$('#selection-note').textContent=isScene()?(sceneEditor?.selectedIds.length?'Object selected':'Whole scene'):selected.length?`${selected.length===1?currentLayer()?.name:selected.length+' elements'} selected`:'Whole canvas';}
-async function openDocument(next){await flush();$('#run-status').textContent='';$('#prompt').value=localStorage.getItem('cosmic.prompt.'+next.projectId)||next.brief;localStorage.setItem('cosmic.openProject',next.projectId);undo=[];redo=[];selected=[];boardId=next.boards[0].id;document.body.classList.remove('home-visible');acceptDocument(next);setMode('edit');requestAnimationFrame(fit);}
+async function openDocument(next){await flush();$('#run-status').textContent='';$('#prompt').value=localStorage.getItem('cosmic.prompt.'+next.projectId)||next.brief;draftVersion=0;draftRun=null;draftVisible=false;lastRun=null;activeJob=null;submitError='';undo=[];redo=[];selected=[];boardId=next.boards[0].id;document.body.classList.remove('home-visible','generation-running');$('#generate').disabled=false;$('#project-name').disabled=false;$('#properties').inert=false;for(const id of ['cancel-run','retry-run','keep-run-draft','canvas-wait'])$('#'+id).hidden=true;acceptDocument(next);activityView.render({jobs:[],activity:[]},doc);setMode('edit');requestAnimationFrame(fit);}
 function renderBoards(){
  $('#boards').innerHTML=doc.boards.map(b=>`<button class="board-row ${b.id===boardId?'active':''}" data-board="${esc(b.id)}">▤ ${esc(b.name)}<span>${b.width} × ${b.height}</span></button>`).join('');
  $$('#boards button').forEach(b=>b.onclick=()=>{boardId=b.dataset.board;selected=[];render();fit();});
@@ -63,7 +66,7 @@ function renderCanvas(){
   if(mode==='preview'&&l.animation!=='none')el.style.animation=`cosmic-${l.animation} ${l.duration}s ease ${l.delay}s both`;
   if(mode==='edit'&&selected.includes(l.id)&&!l.locked){const h=document.createElement('span');h.className='resize-handle';h.dataset.resize='true';el.append(h);if(selected.length===1){const tag=document.createElement('span');tag.className='size-badge';tag.textContent=`${Math.round(l.width)} × ${Math.round(l.height)}`;el.append(tag);}}
   el.onpointerdown=e=>startDrag(e,l);
-  el.ondblclick=e=>{if(mode!=='edit'||l.locked||!['text','button'].includes(l.type))return;e.stopPropagation();el.classList.add('editing');c.textContent=l.text;c.contentEditable='true';c.focus();document.getSelection()?.selectAllChildren(c);c.onblur=()=>{const text=c.innerText;c.contentEditable='false';commit([{type:'patch-layer',id:l.id,patch:{text}}]);};c.onkeydown=e=>{e.stopPropagation();if(e.key==='Escape'||(e.key==='Enter'&&(e.ctrlKey||e.metaKey)))c.blur();};};
+  el.ondblclick=e=>{if(activeJob||mode!=='edit'||l.locked||!['text','button'].includes(l.type))return;e.stopPropagation();el.classList.add('editing');c.textContent=l.text;c.contentEditable='true';c.focus();document.getSelection()?.selectAllChildren(c);c.onblur=()=>{const text=c.innerText;c.contentEditable='false';commit([{type:'patch-layer',id:l.id,patch:{text}}]);};c.onkeydown=e=>{e.stopPropagation();if(e.key==='Escape'||(e.key==='Enter'&&(e.ctrlKey||e.metaKey)))c.blur();};};
   el.ondragover=e=>{if(e.dataTransfer.types.includes('application/x-asset'))e.preventDefault();};
   el.ondrop=e=>{const aid=e.dataTransfer.getData('application/x-asset');if(aid){e.preventDefault();e.stopPropagation();if(l.type==='image')commit([{type:'patch-layer',id:l.id,patch:{assetId:aid}}]);else addLayer('image',{assetId:aid,x:l.x,y:l.y,width:l.width,height:l.height});}};
   $('#artboard').append(el);
@@ -71,26 +74,31 @@ function renderCanvas(){
 }
 function startDrag(e,l){
  if(e.button!==0||e.target.closest('[contenteditable=true]'))return;
- if(mode==='preview')return;
+ if(mode==='preview'||activeJob)return;
  if(mode==='comment'){select([l.id]);switchTab('review');$('#review-text').focus();return;}
  if(l.locked){select([l.id]);return;}e.preventDefault();e.stopPropagation();const resize=e.target.dataset.resize==='true';
  if(!selected.includes(l.id))select(e.shiftKey?[...selected,l.id]:[l.id]);else if(e.shiftKey){select(selected.filter(s=>s!==l.id));return;}
  gesture={kind:resize?'resize':'move',x:e.clientX,y:e.clientY,layers:editable().map(l=>structuredClone(l)),before:structuredClone(doc),changed:false};
  document.addEventListener('pointermove',moveDrag);document.addEventListener('pointerup',endDrag,{once:true});
 }
-function moveDrag(e){if(!gesture)return;const dx=(e.clientX-gesture.x)/zoom,dy=(e.clientY-gesture.y)/zoom;if(Math.abs(dx)+Math.abs(dy)<2&&!gesture.changed)return;gesture.changed=true;
+function moveDrag(e){dragEvent=e;if(!dragFrame)dragFrame=requestAnimationFrame(()=>{dragFrame=null;if(dragEvent)updateDrag(dragEvent);});}
+function updateDrag(e){if(!gesture)return;const dx=(e.clientX-gesture.x)/zoom,dy=(e.clientY-gesture.y)/zoom;if(Math.abs(dx)+Math.abs(dy)<2&&!gesture.changed)return;gesture.changed=true;
  for(const original of gesture.layers){const l=doc.layers.find(l=>l.id===original.id);if(gesture.kind==='resize'){l.width=Math.max(8,Math.round(original.width+dx));l.height=Math.max(8,Math.round(original.height+(e.shiftKey?dx*original.height/original.width:dy)));}else{const grid=e.altKey?1:4;l.x=Math.round((original.x+dx)/grid)*grid;l.y=Math.round((original.y+dy)/grid)*grid;}}
- renderCanvas();renderProperties();
+ for(const original of gesture.layers){const l=doc.layers.find(v=>v.id===original.id),el=$('#artboard').querySelector('[data-id="'+CSS.escape(l.id)+'"]');if(el){Object.assign(el.style,{left:l.x+'px',top:l.y+'px',width:l.width+'px',height:l.height+'px'});const tag=el.querySelector('.size-badge');if(tag)tag.textContent=Math.round(l.width)+' × '+Math.round(l.height);}}
 }
-function endDrag(){document.removeEventListener('pointermove',moveDrag);if(!gesture)return;const g=gesture;gesture=null;if(g.changed){const ops=g.layers.map(o=>{const l=doc.layers.find(l=>l.id===o.id);return{type:'patch-layer',id:l.id,patch:{x:l.x,y:l.y,width:l.width,height:l.height}};});doc=g.before;commit(ops);}else renderCanvas();}
+function endDrag(){if(dragFrame)cancelAnimationFrame(dragFrame);dragFrame=null;if(dragEvent)updateDrag(dragEvent);dragEvent=null;document.removeEventListener('pointermove',moveDrag);if(!gesture)return;const g=gesture;gesture=null;if(g.changed){const ops=g.layers.map(o=>{const l=doc.layers.find(l=>l.id===o.id);return{type:'patch-layer',id:l.id,patch:{x:l.x,y:l.y,width:l.width,height:l.height}};});doc=g.before;commit(ops);}else renderCanvas();}
 function prop(label,key,value,min=0,max=10000){return `<label class="prop-field"><span data-scrub="${key}" title="Drag horizontally to scrub ${label}">${label}</span><input data-prop="${key}" type="number" min="${min}" max="${max}" step="${key==='duration'||key==='delay'?'.1':'1'}" value="${value}"></label>`;}
 function option(values,value){return values.map(v=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(v)}</option>`).join('');}
 function componentProperties(l){
  const field=(label,key,value,type='text')=>`<label class="prop-field prop-full">${label}<input data-prop="${key}" type="${type}" ${type==='checkbox'?(value?'checked':''):`value="${esc(value)}"`} ${type==='number'?'step="any"':''}></label>`;
  const choose=(label,key,values)=>`<label class="prop-field prop-full">${label}<select data-prop="${key}">${option(values,l[key])}</select></label>`;
- const sources=doc.layers.filter(v=>v.id!==l.id&&['slider','input','textarea','toggle','checkbox','select','tabs','progress'].includes(v.type));
+ const sources=doc.layers.filter(v=>v.id!==l.id&&(['slider','input','textarea','toggle','checkbox','select','tabs','progress'].includes(v.type)||['text','button'].includes(v.type)&&(v.value!==''||v.text.includes('{{value}}'))));
  const targetSelect=(label,key)=>`<label class="prop-field prop-full">${label}<select data-prop="${key}"><option value="">None</option>${sources.map(v=>`<option value="${esc(v.id)}" ${v.id===l[key]?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`;
  let controls='';
+ if(['text','button'].includes(l.type))controls+=field('Line height (0 = default)','lineHeight',l.lineHeight,'number')+field('Letter spacing','letterSpacing',l.letterSpacing,'number');
+ controls+=field('Border color','borderColor',l.borderColor)+field('Border width','borderWidth',l.borderWidth,'number')+choose('Shadow','shadow',['none','soft','raised','deep'])+field('Gradient end color (optional)','gradientTo',l.gradientTo)+field('Gradient angle','gradientAngle',l.gradientAngle,'number');
+ if(['shape','button'].includes(l.type))controls+=choose('Icon','icon',['none','folder','film','play','pause','plus','search','grid','list','arrow-right','chevron-right','chevron-down','upload','download','settings','star','clock','check','close','more','link','volume','image','trash','sun']);
+ if(['text','button'].includes(l.type)&&(l.value!==''||l.text.includes('{{value}}')))controls+=field('Starting value','value',l.value,typeof l.value==='number'?'number':'text');
  if(['slider','progress'].includes(l.type))controls+=field('Starting value','value',l.value===''?50:l.value,'number')+field('Minimum','min',l.min,'number')+field('Maximum','max',l.max,'number')+field('Step','step',l.step,'number')+field('Unit, e.g. % or px','suffix',l.suffix);
  if(['toggle','checkbox','accordion'].includes(l.type))controls+=field(l.type==='accordion'?'Start expanded':'Start checked','checked',l.checked,'checkbox');
  if(['input','textarea','select','tabs'].includes(l.type))controls+=field('Starting value','value',l.value);
@@ -110,7 +118,7 @@ function renderProperties(){
   $$('[data-board-prop]').forEach(el=>el.onchange=()=>commit([{type:'patch-board',id:b.id,patch:{[el.dataset.boardProp]:el.value}}]));$$('[data-prop]').forEach(el=>el.onchange=()=>commit([{type:'patch-board',id:b.id,patch:{[el.dataset.prop.replace('board-','')]:Number(el.value)}}]));$('#brief').onchange=e=>commit([{type:'patch-project',brief:e.target.value}]);$('#import-project').onclick=()=>$('#project-input').click();return;}
  $('#properties').innerHTML=`<section class="prop-section"><div class="prop-grid"><label class="prop-field prop-full">Layer name<input data-prop="name" value="${esc(l.name)}"></label></div></section><section class="prop-section"><h3>Position & size</h3><div class="prop-grid">${prop('X','x',l.x,-10000)}${prop('Y','y',l.y,-10000)}${prop('Width','width',l.width,1)}${prop('Height','height',l.height,1)}${prop('Rotation','rotation',l.rotation,-360,360)}${prop('Radius','radius',l.radius,0,1000)}</div><div class="align-controls" style="margin-top:10px"><button data-align="left" title="Align left">⇤</button><button data-align="center" title="Center horizontally">↔</button><button data-align="right" title="Align right">⇥</button><button data-arrange="front" title="Bring to front">↑</button><button data-arrange="back" title="Send to back">↓</button></div></section>
  <section class="prop-section"><h3>Appearance</h3><div class="prop-grid"><label class="prop-field prop-full">Fill<div class="fill-row"><input type="color" data-prop="fill" value="${l.fill==='transparent'?'#ffffff':l.fill}"><input type="text" data-prop="fill" value="${l.fill}" aria-label="Fill hex color"></div></label><label class="prop-field prop-full">Opacity<div class="opacity-row"><input id="opacity" type="range" min="0" max="100" value="${Math.round(l.opacity*100)}"><output>${Math.round(l.opacity*100)}%</output></div></label></div></section>
- ${!['image','shape'].includes(l.type)?`<section class="prop-section"><h3>${['select','tabs'].includes(l.type)?'Options, one per line':'Typography'}</h3><div class="prop-grid"><label class="prop-field prop-full"><textarea data-prop="text" aria-label="Layer text">${esc(l.text)}</textarea></label>${prop('Size','fontSize',l.fontSize,6,400)}${prop('Weight','fontWeight',l.fontWeight,100,900)}<label class="prop-field">Typeface<select data-prop="fontFamily">${option(['sans','serif','mono'],l.fontFamily)}</select></label><label class="prop-field">Alignment<select data-prop="align">${option(['left','center','right'],l.align)}</select></label><label class="prop-field prop-full">Text color<input type="color" data-prop="color" value="${l.color}"></label></div></section>`:''}
+ ${!['image','shape'].includes(l.type)?`<section class="prop-section"><h3>${['select','tabs'].includes(l.type)?'Options, one per line':'Typography'}</h3><div class="prop-grid"><label class="prop-field prop-full"><textarea data-prop="text" aria-label="Layer text">${esc(l.text)}</textarea></label>${prop('Size','fontSize',l.fontSize,6,400)}${prop('Weight','fontWeight',l.fontWeight,100,900)}<label class="prop-field">Typeface<select data-prop="fontFamily">${option(Object.keys(fonts),l.fontFamily)}</select></label><label class="prop-field">Alignment<select data-prop="align">${option(['left','center','right'],l.align)}</select></label><label class="prop-field prop-full">Text color<input type="color" data-prop="color" value="${l.color}"></label></div></section>`:''}
  ${l.type==='image'?`<section class="prop-section"><h3>Image</h3><label class="prop-field">Fit<select data-prop="fit">${option(['cover','contain'],l.fit)}</select></label><button id="replace-image" class="wide">Choose from library</button><button id="regenerate-image" class="wide">✦ Edit image with Codex</button></section>`:''}
  <section class="prop-section"><h3>Entrance in Preview</h3><label class="prop-field">Animation<select data-prop="animation">${option(['none','fade','slide','scale'],l.animation)}</select></label><div class="prop-grid">${prop('Duration','duration',l.duration,.1,10)}${prop('Delay','delay',l.delay,0,9)}</div></section>
  ${componentProperties(l)}`;
@@ -128,7 +136,7 @@ function startScrub(e,key){if(e.button!==0)return;e.preventDefault();const start
 }
 function addLayer(type,extra={}){if(isScene()){toast('Use the Object menu to add to your scene.');return;}const b=currentBoard();const defaults={text:{text:'Your headline',width:340,height:66,fontSize:44,fill:'transparent'},shape:{width:220,height:150,fill:'#bccdea',radius:12},image:{width:320,height:240,fill:'#e5e7eb'},button:{text:'Continue',width:170,height:48,fontSize:16,fill:'#305ed6',color:'#ffffff',radius:7},input:{text:'Enter your email',width:280,height:44,fontSize:16,fill:'#ffffff',radius:6},slider:{width:260,height:32,color:'#305ed6',fill:'transparent'},toggle:{width:44,height:28,color:'#305ed6',fill:'transparent'},select:{text:'Choose an option\nFirst option\nSecond option',width:250,height:44,fontSize:16,fill:'#ffffff',radius:6},checkbox:{text:'I agree',width:240,height:32,fontSize:16,fill:'transparent',color:'#305ed6'},textarea:{text:'Write your message',width:300,height:110,fontSize:16,radius:8},tabs:{text:'Overview\nActivity\nSettings',width:360,height:48,fontSize:15,radius:8},accordion:{text:'How does it work?\nClick to expand this content.',width:340,height:150,fontSize:16,radius:8},progress:{width:280,height:32,fontSize:15,fill:'transparent',color:'#305ed6',suffix:'%'}};
  const layer=layerSchema.parse({id:id(),boardId:b.id,type,name:type[0].toUpperCase()+type.slice(1),x:Math.max(20,(b.width-(defaults[type].width||200))/2),y:Math.max(20,(b.height-(defaults[type].height||100))/2),...defaults[type],...extra});commit([{type:'add-layer',layer}]);select([layer.id]);}
-function fit(){if(isScene()){sceneEditor?.update(doc.scene);return;}const v=$('#viewport'),b=currentBoard();zoom=Math.max(.15,Math.min(1,(v.clientWidth-88)/b.width,(v.clientHeight-85)/b.height));renderCanvas();}
+function fit(){if(isScene()){sceneEditor?.update(doc.scene);return;}const v=$('#viewport'),b=currentBoard(),s=getComputedStyle(v),px=value=>parseFloat(value)||0;zoom=Math.max(.15,Math.min(1,(v.clientWidth-px(s.paddingLeft)-px(s.paddingRight))/b.width,(v.clientHeight-px(s.paddingTop)-px(s.paddingBottom))/b.height));renderCanvas();}
 function setMode(next){mode=next;if(isScene()){$('#canvas-hint').textContent='Drag to orbit · scroll to zoom · select an object to transform';return;}document.body.classList.toggle('previewing',mode==='preview');$$('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));$('#canvas-hint').textContent=mode==='preview'?'Try the controls. Values stay in this preview until you reset.':mode==='comment'?'Click an element to leave a comment.':'Drag to move · double-click text to edit · Shift for multi-select';renderCanvas();}
 function switchTab(next){tab=next;$$('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));['design','assets','review','activity'].forEach(t=>$('#'+t+'-panel').hidden=t!==tab);}
 function renderAssets(){
@@ -141,7 +149,7 @@ function placeAsset(aid,position={}){const l=currentLayer();if(l?.type==='image'
 async function uploadFiles(files,asReference=false){for(const file of files){if(!['image/png','image/jpeg','image/webp'].includes(file.type)){toast('Use PNG, JPEG or WebP images.');continue;}if(file.size>15*1024*1024){toast('Images must be under 15 MB.');continue;}try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('This image could not be opened.'));img.src=data;});commit([{type:'add-asset',asset:{id:id(),name:file.name,data,width:img.naturalWidth,height:img.naturalHeight,role:asReference?'reference':assetRole,notes:''}}]);switchTab('assets');}catch(e){error(e);}}}
 function renderReviews(){$('#reviews').innerHTML=doc.reviews.toReversed().map(r=>`<div class="review-card"><small>${esc(doc.layers.find(l=>l.id===r.layerId)?.name||'Canvas')} · ${new Date(r.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</small>${esc(r.text)}</div>`).join('');}
 function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-async function restore(direction){await flush();const source=direction==='undo'?undo:redo,target=direction==='undo'?redo:undo;if(!source.length)return;const prev=source.pop();try{const result=await api('replace_design',{document:prev,baseRevision:doc.revision});target.push(structuredClone(doc));acceptDocument(result.document);}catch(e){source.push(prev);error(e);}}
+async function restore(direction){if(activeJob)return toast('Stop generation before editing the canvas.');await flush();const source=direction==='undo'?undo:redo,target=direction==='undo'?redo:undo;if(!source.length)return;const prev=source.pop();try{const result=await api('replace_design',{document:prev,baseRevision:doc.revision});target.push(structuredClone(doc));acceptDocument(result.document);}catch(e){source.push(prev);error(e);}}
 function isTyping(){return document.activeElement?.matches('input,textarea,select,[contenteditable=true]');}
 async function sendToHost(text){
  if(bridge){const r=await bridge.sendMessage({role:'user',content:[{type:'text',text}]});if(r.isError)throw Error('The host did not accept this request.');toast('Request sent to Codex.');return;}
@@ -152,37 +160,49 @@ function imageRequest(edit=false){const l=currentLayer();dialog(edit?'Edit selec
 async function generate(review=false){
  if(submitting||activeJob)return;
  const prompt=$('#prompt').value.trim();if(!prompt&&!review){$('#prompt').focus();toast('Describe what you want to create or change.');return;}
- localStorage.setItem('cosmic.prompt.'+doc.projectId,prompt);await flush();
- if(!review&&(bridge||window.openai?.sendFollowUpMessage)){await designWithAssets();return;}
- submitting=true;$('#generate').disabled=true;$('#run-status').textContent='Starting your design…';switchTab('activity');
- try{const result=await api('start_design_run',{prompt:review?'Review this UI for hierarchy, spacing, usability, responsive layout, and accessibility. '+prompt:prompt,model:$('#model').value,effort:$('#effort').value,selectedIds:isScene()?sceneEditor.selectedIds:selected,boardId,review});activeJob=result.job.status==='running'?result.job.id:null;$('#run-status').textContent=result.job.message;}
- catch(e){$('#run-status').textContent=e.message;error(e);}
- finally{submitting=false;$('#generate').disabled=!!activeJob;$('#cancel-run').hidden=!activeJob;await checkJob();}
+ submitting=true;submitError='';$('#generate').disabled=true;$('#run-status').textContent='Starting your design…';switchTab('activity');
+ try{localStorage.setItem('cosmic.prompt.'+doc.projectId,prompt);await flush();
+  const result=await api('start_design_run',{prompt:review?'Review hierarchy, spacing, usability and accessibility. '+prompt:prompt,model:$('#model').value,effort:$('#effort').value,selectedIds:isScene()?sceneEditor.selectedIds:selected,boardId,review});
+  activeJob=result.job.status==='running'?result.job.id:null;$('#run-status').textContent=result.job.message;
+ }catch(e){submitError=e.message;$('#run-status').textContent=e.message;error(e);}
+ finally{submitting=false;await checkJob();}
 }
 async function checkJob(){
- if(jobChecking||!connected)return;jobChecking=true;
+ if(jobChecking||!connected)return;jobChecking=true;const requestedProject=doc.projectId;
  try{
-  const state=await api('get_studio_status',{projectId:doc.projectId});const job=state.jobs?.[0];
-  activeJob=job?.status==='running'?job.id:null;
+  const state=await api('get_studio_status',{projectId:requestedProject});if(doc.projectId!==requestedProject)return;
+  const job=state.jobs?.[0];lastRun=job;activeJob=job?.status==='running'?job.id:null;
   $('#generate').disabled=submitting||!!activeJob;$('#cancel-run').hidden=!activeJob;
-  if(job)$('#run-status').textContent=job.status==='running'?job.message:job.status==='completed'?'Design ready. Try it in Preview.':job.message;
+  $('#project-name').disabled=!!activeJob;$('#properties').inert=!!activeJob;document.body.classList.toggle('generation-running',!!activeJob);
+  $('#keep-run-draft').hidden=!job?.previewVersion||job.status==='running'||job.status==='completed';
+  $('#retry-run').hidden=!job||['running','completed'].includes(job.status);
+  if(submitError||job)$('#run-status').textContent=submitError||(job.status==='completed'?'Design saved. Try it in Preview.':job.message);
   const canRefresh=!saving&&!pending.length&&!gesture&&!sceneEditor?.interacting&&(!isTyping()||document.activeElement.id==='prompt');
-  if(state.revision!==doc.revision&&canRefresh){
-   const result=await api('read_design',{includeImages:true,projectId:doc.projectId});
-   arriving=new Set(result.document.layers.filter(l=>!doc.layers.some(old=>old.id===l.id)).map(l=>l.id));
-   undo=[];redo=[];acceptDocument(result.document);arriving.clear();$('#save-status').textContent='Saved locally';
+  if(activeJob&&job.previewVersion&&canRefresh&&(draftRun!==job.id||draftVersion!==job.previewVersion)){
+   const result=await api('get_design_run_preview',{id:job.id});if(doc.projectId!==requestedProject)return;
+   const first=draftRun!==job.id;arriving=new Set(result.document.layers.filter(l=>!doc.layers.some(old=>old.id===l.id)).map(l=>l.id));
+   if(first&&job.boardIds?.length)boardId=job.boardIds[0];
+   draftRun=job.id;draftVersion=job.previewVersion;draftVisible=true;selected=[];acceptDocument(result.document);arriving.clear();
+   $('#save-status').textContent='Live draft · saving when complete';if(first)fit();
+  }else if(!activeJob&&canRefresh&&(state.revision!==doc.revision||draftVisible)){
+   const result=await api('read_design',{includeImages:true,projectId:requestedProject});if(doc.projectId!==requestedProject)return;
+   draftVisible=false;draftRun=null;draftVersion=0;undo=[];redo=[];acceptDocument(result.document);$('#save-status').textContent='Saved locally';
   }
-  if(job?.status==='completed'&&lastCompleted!==job.id&&canRefresh){lastCompleted=job.id;if(job.boardIds?.length&&doc.boards.some(b=>b.id===job.boardIds[0])){boardId=job.boardIds[0];selected=[];render();fit();}}
+  if(job?.status==='completed'&&lastCompleted!==job.id&&canRefresh){lastCompleted=job.id;if(job.boardIds?.length&&doc.boards.some(b=>b.id===job.boardIds[0]))boardId=job.boardIds[0];selected=[];render();fit();}
+  if(activeJob){$('#undo').disabled=true;$('#redo').disabled=true;}
+  $('#canvas-wait').hidden=!activeJob||doc.layers.length>0||isScene();
   activityView.render(state,doc);
- }catch(e){
-  $('#run-status').textContent='Connection interrupted. Reconnecting…';$('#save-status').textContent='Reconnecting…';
-  if(e.code==='RUN_NOT_FOUND'||/Unknown design run|no longer available/.test(e.message)){activeJob=null;$('#generate').disabled=false;$('#cancel-run').hidden=true;$('#run-status').textContent='The previous run is unavailable. Your prompt is saved. Create design to retry.';}
- }finally{jobChecking=false;}
+ }catch(e){$('#run-status').textContent='Studio disconnected. Your request is saved; reconnect or reopen Cosmic to retry.';$('#save-status').textContent='Disconnected';$('#generate').disabled=true;}
+ finally{jobChecking=false;}
 }
 
 async function designWithAssets(){await flush();const prompt=$('#prompt').value.trim()||doc.brief||'Complete this design and create any missing visual assets.';await sendToHost(assetDesignRequest({projectId:doc.projectId,name:doc.name,prompt,boardId,selectedIds:selected,model:$('#model').value,effort:$('#effort').value}));}
 function bind(){
- const autoAssets=document.createElement('button');autoAssets.id='design-with-assets';autoAssets.className='wide';autoAssets.textContent='✦ Design + assets with Codex';autoAssets.title='Codex plans, generates, prepares and places the assets your design needs';autoAssets.onclick=()=>designWithAssets().catch(error);$('#generate-asset').before(autoAssets);
+ const recovery=document.createElement('div');recovery.className='run-recovery';recovery.innerHTML='<button id="retry-run" hidden>Retry request</button><button id="keep-run-draft" hidden>Open draft as a new project</button>';$('#run-status').after(recovery);
+ $('#retry-run').onclick=()=>{if(lastRun?.prompt)$('#prompt').value=lastRun.prompt;generate();};
+ $('#keep-run-draft').onclick=async()=>{try{if(!lastRun)return;const draft=await api('get_design_run_preview',{id:lastRun.id});await openDocument((await api('create_project',{document:draft.document,name:draft.document.name+' · recovered draft'})).document);toast('Draft opened as a separate project.');await checkJob();}catch(e){error(e);}};
+ const waiting=document.createElement('div');waiting.id='canvas-wait';waiting.hidden=true;waiting.innerHTML='<span class="waiting-orbit" aria-hidden="true"></span><strong>Composing your design</strong><span>Completed elements will appear here live.</span>';$('#viewport').append(waiting);
+ const autoAssets=document.createElement('button');autoAssets.id='design-with-assets';autoAssets.className='wide';autoAssets.textContent='✦ Design with imagery when useful';autoAssets.title='Ask Codex to choose native elements or generated imagery for this design';autoAssets.onclick=()=>designWithAssets().catch(error);$('#generate-asset').before(autoAssets);
  $('#project-skills').onclick=()=>openSkills({getSkills:()=>doc.designSkills,setSkills:next=>{commit([{type:'patch-project',designSkills:next}]);return flush();},dialog,toast});
  $('#delete-board').onclick=()=>{const b=currentBoard();dialog('Delete page',`<p>Delete ${esc(b.name)} and its layers? You can undo this change.</p><button id="confirm-delete-page" class="danger wide">Delete page</button>`);$('#confirm-delete-page').onclick=()=>{commit([{type:'delete-board',id:b.id}]);boardId=doc.boards[0].id;render();fit();$('#dialog').close();};};
  $('#add-object').onclick=()=>sceneEditor.add($('#geometry-choice').value);$('#scene-inspector-toggle').onclick=()=>document.body.classList.toggle('inspector-open');$$('[data-transform]').forEach(b=>b.onclick=()=>{sceneEditor.setTransform(b.dataset.transform);$$('[data-transform]').forEach(v=>v.classList.toggle('active',b===v));});
@@ -190,7 +210,7 @@ function bind(){
  $('#toggle-inspector').onclick=()=>document.body.classList.toggle('inspector-open');$('#close-inspector').onclick=()=>document.body.classList.remove('inspector-open');
  $$('#design-panel,[data-tab]').filter(e=>e.dataset.tab).forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));$$('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
  ['text','shape','button','input','slider','toggle','select'].forEach(t=>$('#add-'+t).onclick=()=>addLayer(t));$('#select-tool').onclick=()=>setMode('edit');$('#add-image').onclick=()=>$('#file-input').click();
- $('#component-library').onclick=()=>{dialog('Working components',`<p>Each component includes its own working controls and motion. Set its starting value and connections in the inspector.</p><div class="component-picker">${['button','input','textarea','slider','toggle','checkbox','select','tabs','accordion','progress'].map(t=>`<button data-component="${t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>`);$('[data-component]').forEach(b=>b.onclick=()=>{setMode('edit');addLayer(b.dataset.component);$('#dialog').close();document.body.classList.add('inspector-open');});};$('#reset-preview').onclick=()=>{prototype.reset();toast('Preview values reset.');};
+ $('#component-library').onclick=()=>{dialog('Working components',`<p>Each component includes its own working controls and motion. Set its starting value and connections in the inspector.</p><div class="component-picker">${['button','input','textarea','slider','toggle','checkbox','select','tabs','accordion','progress'].map(t=>`<button data-component="${t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>`);$$('[data-component]').forEach(b=>b.onclick=()=>{setMode('edit');addLayer(b.dataset.component);$('#dialog').close();document.body.classList.add('inspector-open');});};$('#reset-preview').onclick=()=>{prototype.reset();toast('Preview values reset.');};
  $('#prompt').oninput=()=>localStorage.setItem('cosmic.prompt.'+doc.projectId,$('#prompt').value);
  $('#project-name').onchange=e=>commit([{type:'patch-project',name:e.target.value||'Untitled design'}]);$('#undo').onclick=()=>restore('undo');$('#redo').onclick=()=>restore('redo');$('#zoom-in').onclick=()=>{zoom=Math.min(2.5,zoom+.1);renderCanvas();};$('#zoom-out').onclick=()=>{zoom=Math.max(.15,zoom-.1);renderCanvas();};$('#zoom-fit').onclick=fit;
  $('#artboard').onpointerdown=e=>{if(e.target===$('#artboard'))select([]);};$('#viewport').onpointerdown=e=>{if(e.target===$('#viewport'))select([]);};
@@ -211,14 +231,14 @@ function bind(){
  document.addEventListener('keydown',e=>{if(isTyping()||$('#dialog').open||document.body.classList.contains('home-visible'))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();restore(e.shiftKey?'redo':'undo');return;}if(e.key==='Escape'){select([]);if(document.body.classList.contains('presenting'))$('#exit-present').click();}if(mode!=='edit')return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'){e.preventDefault();$('#duplicate').click();}if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();$('#delete').click();}if(isScene())return;if(e.key.toLowerCase()==='t')addLayer('text');if(e.key.toLowerCase()==='r')addLayer('shape');if(e.key.toLowerCase()==='v')setMode('edit');const delta={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];if(delta&&selected.length){e.preventDefault();const amount=e.shiftKey?10:1;commit(editable().map(l=>({type:'patch-layer',id:l.id,patch:{x:l.x+delta[0]*amount,y:l.y+delta[1]*amount}})));}});
  window.addEventListener('beforeunload',e=>{if(saving||pending.length){e.preventDefault();e.returnValue='';}});
 }
-async function registerWebTools(){const ctx=document.modelContext;if(!ctx?.registerTool)return;const abort=new AbortController();const defs=[{name:'read_design_canvas',title:'Read design canvas',description:'Read the live editable design, selected layers, references and brief.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({document:{...doc,assets:doc.assets.map(({data,...a})=>a)},selectedIds:isScene()?sceneEditor.selectedIds:selected,boardId,previewState:prototype.getState()})},{name:'edit_design_canvas',title:'Edit design canvas',description:'Apply validated operations to the same canvas used by the person. Read the canvas first.',inputSchema:{type:'object',properties:{operations:{type:'array',items:{type:'object'}}},required:['operations'],additionalProperties:false},execute:async input=>{applyOperations(doc,input.operations);commit(input.operations);await flush();return{revision:doc.revision,layerCount:doc.layers.length};}}];for(const t of defs)await ctx.registerTool(t,{signal:abort.signal});window.addEventListener('pagehide',()=>abort.abort(),{once:true});}
+async function registerWebTools(){const ctx=document.modelContext;if(!ctx?.registerTool)return;const abort=new AbortController();const defs=[{name:'read_design_canvas',title:'Read design canvas',description:'Read the live editable design, selected layers, references and brief.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>({document:{...doc,assets:doc.assets.map(({data,...a})=>a)},selectedIds:isScene()?sceneEditor.selectedIds:selected,boardId,previewState:prototype.getState()})},{name:'edit_design_canvas',title:'Edit design canvas',description:'Apply validated operations to the same canvas used by the person. Read the canvas first.',inputSchema:{type:'object',properties:{operations:{type:'array',items:{type:'object'}}},required:['operations'],additionalProperties:false},execute:async input=>{if(activeJob)throw Error('A design is running. Stop it before editing the live draft.');applyOperations(doc,input.operations);commit(input.operations);await flush();return{revision:doc.revision,layerCount:doc.layers.length};}}];for(const t of defs)await ctx.registerTool(t,{signal:abort.signal});window.addEventListener('pagehide',()=>abort.abort(),{once:true});}
 async function init(){
  sceneEditor=createSceneEditor({container:$('#scene-view'),commit,getDoc:()=>doc,toast,download});
  bind();home=createHome({api,openDocument,flush,generate,uploadFiles,commit,getDoc:()=>doc,dialog,toast});render();
  try{
   if(window.parent!==window){const app=new App({name:'Codex Cosmic',version:'0.1.0'},{},{autoResize:false});app.ontoolresult=params=>{if(params.structuredContent?.document&&!saving&&!pending.length)acceptDocument(params.structuredContent.document);};await app.connect(undefined,{timeout:5000});bridge=app;}
-  acceptDocument((await api('read_design',{includeImages:true})).document);connected=true;$('#save-status').textContent='Saved locally';$('#connection-dot').style.color='#8ac9aa';$('#connection-note').textContent='Design runs use your Codex allowance';await registerWebTools();if(localStorage.getItem('cosmic.openProject')===doc.projectId)await openDocument(doc);else await home.show();await checkJob();
+  acceptDocument((await api('read_design',{includeImages:true})).document);connected=true;$('#save-status').textContent='Saved locally';$('#connection-dot').style.color='#8ac9aa';$('#connection-note').textContent='Design runs use your Codex allowance';await registerWebTools();await home.show();await checkJob();
  }catch(e){$('#save-status').textContent='Not connected';$('#connection-note').textContent='Connection unavailable. Reopen using the launcher.';$('#generate').disabled=true;error(e);}
- fit();setInterval(()=>checkJob(),1500);
+ fit();let resizeFrame;new ResizeObserver(()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{if(!gesture&&!document.body.classList.contains('home-visible'))fit();});}).observe($('#viewport'));setInterval(()=>checkJob(),700);
 }
 init();

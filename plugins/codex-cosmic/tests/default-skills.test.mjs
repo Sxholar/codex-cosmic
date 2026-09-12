@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {loadDefaultDesignSkills} from '../src/default-skills.mjs';
 import {createLibrary} from '../src/library.mjs';
 import {applyOperations} from '../src/model.mjs';
-import {designRunContext} from '../src/runner.mjs';
+import {designRunContext} from '../src/design-prompt.mjs';
 
 test('bundled master skill reaches new projects and enabled runner context in full',()=>{
  const defaults=loadDefaultDesignSkills(),content=readFileSync(new URL('../skills/codex-cosmic/references/ui-master-skill.md',import.meta.url),'utf8');

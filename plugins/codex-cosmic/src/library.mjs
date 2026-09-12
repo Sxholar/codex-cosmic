@@ -1,7 +1,7 @@
 import {existsSync,mkdirSync,readFileSync,writeFileSync,renameSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {createDemo,validateDocument,designSkillsSchema} from './model.mjs';
+import {validateDocument,designSkillsSchema} from './model.mjs';
 import {templates,fromTemplate} from './templates.mjs';
 export function createLibrary(root,{defaultDesignSkills=[]}={}){
  const defaults=designSkillsSchema.parse(defaultDesignSkills);
@@ -14,12 +14,13 @@ export function createLibrary(root,{defaultDesignSkills=[]}={}){
  function config(){return JSON.parse(readFileSync(state,'utf8'));}
  function entry(id){return JSON.parse(readFileSync(join(projects,validId(id)+'.json'),'utf8'));}
  function put(e){atomic(join(projects,validId(e.document.projectId)+'.json'),e);return e.document;}
- function create({templateId='blank',name,brief='',document,designSkills}={}){
+ function create({templateId='blank',name,brief='',document,designSkills,fresh=false}={}){
   let d=document?validateDocument(document):templateId.startsWith('custom-')?validateDocument(JSON.parse(readFileSync(join(custom,validId(templateId)+'.json'),'utf8')).document):fromTemplate(templateId,name,brief);
+  if(fresh&&!document)d={...d,layers:[],assets:[],references:[],reviews:[],scene:{...d.scene,objects:[]}};
   d.designSkills=designSkills!==undefined?designSkillsSchema.parse(designSkills):!document&&!templateId.startsWith('custom-')?structuredClone(defaults):d.designSkills;
   d={...d,projectId:randomUUID(),revision:0,name:name?.trim()||d.name,brief:brief||d.brief};d=validateDocument(d);put({document:d,updatedAt:new Date().toISOString(),deleted:false});atomic(state,{activeId:d.projectId});return d;
  }
- if(!existsSync(state)){const old=join(root,'project.json');create({document:existsSync(old)?JSON.parse(readFileSync(old,'utf8')):createDemo()});}
+ if(!existsSync(state)){const old=join(root,'project.json');create({document:existsSync(old)?JSON.parse(readFileSync(old,'utf8')):fromTemplate('blank')});}
  function read(id=config().activeId){const e=entry(id);if(e.deleted)throw Error('This project is in Trash. Restore it first.');return validateDocument(e.document);}
  function save(doc,revision,id=doc.projectId||config().activeId){const e=entry(id);if(e.deleted)throw Error('This project was moved to Trash. Restore it first.');if(revision!==undefined&&revision!==e.document.revision){const err=Error('The project changed elsewhere. Reload before applying this edit.');err.status=409;throw err;}const next=validateDocument({...doc,projectId:id,revision:e.document.revision+1});return put({...e,document:next,updatedAt:new Date().toISOString()});}
  function list(){const deleted=hiddenTemplates(),files=readdirSync(custom);return {defaultDesignSkills:structuredClone(defaults),activeId:config().activeId,projects:readdirSync(projects).filter(f=>f.endsWith('.json')).map(f=>{const e=JSON.parse(readFileSync(join(projects,f),'utf8')),d=e.document;return{id:d.projectId,name:d.name,kind:d.kind||'canvas',updatedAt:e.updatedAt,deleted:e.deleted,boardCount:d.boards.length,layerCount:d.layers.length,objectCount:d.scene?.objects.length||0,preview:{board:d.boards[0],layers:d.layers.filter(l=>l.boardId===d.boards[0].id).slice(0,35).map(({text,fill,color,type,x,y,width,height,radius,fontSize,fontFamily})=>({text,fill,color,type,x,y,width,height,radius,fontSize,fontFamily}))}};}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)),templates:[...templates.filter(t=>!deleted.includes(t.id)),...files.filter(f=>f.endsWith('.json')).map(templateMetadata)],deletedTemplates:[...templates.filter(t=>deleted.includes(t.id)),...files.filter(f=>f.endsWith('.json.deleted')).map(templateMetadata)]};}

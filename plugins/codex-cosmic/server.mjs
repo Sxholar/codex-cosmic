@@ -12,14 +12,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { createDemo,validateDocument,applyOperations,layerSchema,exportHtml,designSkillsSchema } from './src/model.mjs';
 import { createLibrary } from './src/library.mjs';
-import { createRunner } from './src/runner.mjs';
+import { createRunner } from './src/live-runner.mjs';
 import sharp from 'sharp';
 import {prepareAsset,prepareAssetSchema} from './src/asset-prep.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const DATA=cosmicDataPath(ROOT);
 const HTTP_MODE=process.argv.includes('--http');
-const RUNTIME_VERSION='0.2.0-live';
+const RUNTIME_VERSION='0.3.0-streaming';
 const PORT=Number(process.env.CODEX_COSMIC_PORT||47831);
 const URL_BASE=`http://127.0.0.1:${PORT}`;
 mkdirSync(DATA,{recursive:true});mkdirSync(join(DATA,'images'),{recursive:true});
@@ -42,8 +42,8 @@ async function dispatch(name,args={}){
 
     case 'get_studio_status': return {projectId:current.projectId,revision:current.revision,runtimeVersion:RUNTIME_VERSION,jobs:runner.list(current.projectId),activity:activity.read(current.projectId),assets:summary(current).assets.map(({localPath,...a})=>a)};
     case 'report_design_progress': return {event:activity.add(current.projectId,args)};
-    case 'open_studio': return {document:summary(current),url:URL_BASE,dataPath:DATA};
-    case 'read_design': return {document:args.includeImages?current:summary(current),url:URL_BASE,dataPath:DATA};
+    case 'open_studio': return {document:summary(current),url:URL_BASE};
+    case 'read_design': return {document:args.includeImages?current:summary(current),url:URL_BASE};
     case 'apply_design_operations': {const next=applyOperations(current,args.operations);for(const a of next.assets.filter(a=>!current.assets.some(x=>x.id===a.id)))storeImage(a);const saved=save(next,args.baseRevision,current.projectId);recordChanges(current,saved);return {document:saved};}
     case 'replace_design': {const next=validateDocument(args.document);for(const a of next.assets)storeImage(a);return{document:save(next,args.baseRevision,current.projectId)};}
     case 'upsert_layers': {const ops=args.layers.map(l=>({type:current.layers.some(x=>x.id===l.id)?'patch-layer':'add-layer',id:l.id,patch:l,layer:l}));const saved=save(applyOperations(current,ops),args.baseRevision,current.projectId);recordChanges(current,saved);return{document:summary(saved)};}
@@ -53,6 +53,7 @@ async function dispatch(name,args={}){
     case 'export_design': return{html:exportHtml(current),document:current};
     case 'start_design_run': return{job:runner.start(args)};
     case 'get_design_run': return{job:runner.get(args.id)};
+    case 'get_design_run_preview': return{document:runner.preview(args.id),job:runner.get(args.id)};
     case 'cancel_design_run': return{job:runner.cancel(args.id)};
     default: throw Error('Unknown tool');
   }
@@ -65,6 +66,7 @@ function recordChanges(before,after){
 }
 let runner=null;
 function initializeRunner(){runner=createRunner({dataPath:DATA,read,save:(next,rev,id)=>{const before=read(id);const result=save(next,rev,id);recordChanges(before,result);return result;},apply:applyOperations,summary,onProgress:(id,event)=>activity.add(id,event)});}
+for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{runner?.shutdown();http.close();process.exit(0);});
 function send(res,status,data,type='application/json'){res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(type==='application/json'?JSON.stringify(data):data);}
 const http=createServer(async(req,res)=>{
   try{
@@ -97,9 +99,9 @@ if(HTTP_MODE){console.log(`Codex Cosmic ready at ${URL_BASE}`);}else{
  const uri='ui://codex-cosmic/studio.html';
  server.registerResource('studio',uri,{},async()=>({contents:[{uri,mimeType:'text/html;profile=mcp-app',text:readFileSync(join(ROOT,'dist/index.html'),'utf8'),_meta:{ui:{prefersBorder:false,csp:{connectDomains:[],resourceDomains:[]}}}}]}));
  const forward=async(name,args)=>{const r=await fetch(URL_BASE+'/api/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,arguments:args})});const result=await r.json();if(!r.ok)throw Error(result.error);return result;};
- const tool=(name,description,schema,readOnly=false,render=false)=>server.registerTool(name,{description,inputSchema:{...schema,projectId:z.string().optional()},annotations:{readOnlyHint:readOnly,destructiveHint:false,openWorldHint:false},...(render?{_meta:{ui:{resourceUri:uri},'openai/outputTemplate':uri}}:{})},async args=>{try{const result=await forward(name,args);if(name==='read_asset'){const a=result.asset;return{content:[{type:'image',data:a.data.split(',')[1],mimeType:a.data.slice(5,a.data.indexOf(';'))},{type:'text',text:JSON.stringify({id:a.id,name:a.name,notes:a.notes})}]};}return{structuredContent:result,content:[{type:'text',text:name==='open_studio'?`Design studio is ready at ${URL_BASE}. The editor shares its saved canvas with these tools.`:JSON.stringify({...result,...(result.document?{document:summary(result.document)}:{})})}]};}catch(e){return{isError:true,content:[{type:'text',text:e.message}]};}});
+ const tool=(name,description,schema,readOnly=false,render=false)=>server.registerTool(name,{description,inputSchema:{...schema,projectId:z.string().optional()},annotations:{readOnlyHint:readOnly,destructiveHint:['apply_design_operations','replace_design','upsert_layers','start_design_run'].includes(name),openWorldHint:name==='start_design_run'},...(render?{_meta:{ui:{resourceUri:uri},'openai/outputTemplate':uri}}:{})},async args=>{try{const result=await forward(name,args);if(name==='read_asset'){const a=result.asset;return{content:[{type:'image',data:a.data.split(',')[1],mimeType:a.data.slice(5,a.data.indexOf(';'))},{type:'text',text:JSON.stringify({id:a.id,name:a.name,notes:a.notes})}]};}return{structuredContent:result,content:[{type:'text',text:name==='open_studio'?`Design studio is ready at ${URL_BASE}. The editor shares its saved canvas with these tools.`:JSON.stringify({...result,...(result.document?{document:summary(result.document)}:{})})}]};}catch(e){return{isError:true,content:[{type:'text',text:e.message}]};}});
  tool('list_projects','List saved local projects, Trash, and built-in or custom templates.',{},true);
- tool('create_project','Create a saved canvas or Three.js scene from a template. Existing projects remain saved.',{templateId:z.string().optional(),name:z.string().optional(),brief:z.string().optional(),document:z.record(z.unknown()).optional(),designSkills:designSkillsSchema.optional()});
+ tool('create_project','Create a saved canvas or Three.js scene from a template. Existing projects remain saved.',{templateId:z.string().optional(),name:z.string().optional(),brief:z.string().optional(),document:z.record(z.unknown()).optional(),designSkills:designSkillsSchema.optional(),fresh:z.boolean().optional()});
  tool('open_project','Open an existing project by ID.',{id:z.string()});
  tool('rename_project','Rename an existing project.',{id:z.string(),name:z.string()});
  tool('trash_project','Move a project into recoverable Trash, or restore it with deleted:false.',{id:z.string(),deleted:z.boolean().optional()});
@@ -118,6 +120,7 @@ if(HTTP_MODE){console.log(`Codex Cosmic ready at ${URL_BASE}`);}else{
  tool('export_design','Return the editable project JSON and a self-contained HTML visual prototype. Exported layout uses board pixel dimensions.',{},true);
  tool('start_design_run','Start a local Codex design generation or review run using the selected model and reasoning effort. Uses the signed-in Codex account and its usage. Only start when the user requests generation. This does not change the model of the host conversation.',{prompt:z.string().max(10000),model:z.string(),effort:z.string(),selectedIds:z.array(z.string()).optional(),boardId:z.string().optional(),review:z.boolean().optional()});
  tool('get_design_run','Read a design run status.',{id:z.string()},true);
+ tool('get_design_run_preview','Read the latest validated partial draft from a design run. This does not change the saved canvas.',{id:z.string()},true);
  tool('cancel_design_run','Stop a running design request.',{id:z.string()});
  await server.connect(new StdioServerTransport());
  process.stdin.on('end',()=>{http.close();process.exit(0);});

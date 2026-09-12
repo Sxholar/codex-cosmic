@@ -1,0 +1,39 @@
+/* Motion follows real interaction; layout updates do not trigger full-page transitions. */
+button,a,input,select,textarea{ -webkit-tap-highlight-color:transparent }
+button{transition:background-color 140ms ease,border-color 140ms ease,color 140ms ease,box-shadow 140ms ease,transform 120ms ease}
+button:not(:disabled):hover{border-color:#a69de076;box-shadow:0 0 0 1px #a69de02a;background-color:#a69de015}
+button:not(:disabled):active{transform:translateY(1px)}
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid #b3a8f1;outline-offset:3px}
+input,select,textarea{transition:border-color 140ms ease,box-shadow 140ms ease;background-clip:padding-box}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#b3a8f1!important;box-shadow:0 0 0 3px #b3a8f119}
+.saved-project,.template-tile,.asset-card,.layer-row,.board-row{transition:background-color 150ms ease,border-color 150ms ease,box-shadow 150ms ease}
+.saved-project:hover,.template-tile:hover,.asset-card:hover{box-shadow:0 5px 20px #0002;border-color:#a69de060}
+.layer-row:hover,.board-row:hover{background:#a69de013}
+.design-layer:not(.selected):hover{outline:1px solid #ac9ee399;outline-offset:1px}
+.design-layer{contain:layout style}
+.design-layer.arriving{animation:element-arrives 240ms cubic-bezier(.2,.8,.2,1) both}
+@keyframes element-arrives{from{opacity:0;translate:0 5px}to{translate:0 0}}
+.panel-body{scrollbar-gutter:stable;animation:panel-appears 140ms ease}
+@keyframes panel-appears{from{opacity:.6}to{opacity:1}}
+.generation-running #properties{opacity:.62}
+#viewport{position:relative}
+#canvas-wait{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none;background:#15151bd9;color:#ebe7fa;text-align:center;z-index:8;font-size:13px}
+#canvas-wait>span:last-child{color:#aaa6b7;font-size:12px}
+.waiting-orbit{width:24px;height:24px;border:2px solid #ac9ee330;border-top-color:#c4b8ff;border-radius:50%;animation:waiting-orbit 1s linear infinite}
+@keyframes waiting-orbit{to{transform:rotate(360deg)}}
+.run-recovery{display:grid;gap:7px;margin-top:10px}.run-recovery button{font-size:12px;text-align:left;padding:9px 11px}
+#run-status{overflow-wrap:anywhere;line-height:1.45}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+button.primary:not(:disabled):hover{background:#c5baf6;color:#201d2b}
+#canvas-wait[hidden]{display:none}
+.previewing .design-layer:not(.selected):hover{outline:none}
+
+/* A compact app panel keeps the canvas usable; its inspector becomes a drawer. */
+.left-panel{min-width:0}.tabs{padding-inline:8px}.tabs button{min-width:0;padding-inline:8px}.layer-name{min-width:0}
+#live-label,#live-time{white-space:nowrap}.prototype-bar{height:auto;min-height:44px;padding-block:7px}.prototype-bar>div{flex-wrap:wrap}
+@media(max-width:1100px){.workspace{grid-template-columns:235px minmax(0,1fr)}.inspector{display:none}#toggle-inspector,#close-inspector{display:block}.inspector-open .inspector{display:flex;position:absolute;right:0;top:107px;bottom:0;width:270px;z-index:15;box-shadow:-12px 0 40px #0007;animation:panel-appears 140ms ease}.topbar .brand{width:auto}.topbar>input{flex:1;min-width:0;max-width:32vw}.topbar{gap:12px}.top-actions{gap:3px}.top-actions #save-status{display:none}.prototype-bar>span{display:none}#viewport{padding:42px 28px}.canvas-toolbar .tool-group button span{display:none}}
+@media(max-width:700px){.workspace{grid-template-columns:210px minmax(0,1fr)}.canvas-toolbar{flex-wrap:wrap;height:auto;min-height:49px;padding:5px}.canvas-toolbar .tool-group:first-child{order:1}.canvas-toolbar .mode-group{order:3;display:flex;width:100%;justify-content:center}.canvas-toolbar .zoom-group{order:2;margin-left:auto}.topbar .brand strong,.topbar .beta{display:none}#viewport{padding:35px 18px}.inspector-open .inspector{top:107px}.prototype-bar>div{display:none}}
+@media(max-width:560px){.workspace{grid-template-columns:minmax(0,1fr)}.left-panel .composer{padding-bottom:12px}.inspector-open .inspector{top:93px;bottom:195px}.topbar>input{display:block;max-width:none}.topbar{height:48px}.canvas-toolbar .mode-group{order:2;width:auto}.canvas-toolbar .zoom-group{order:3}.canvas-toolbar .tool-group:first-child button:not(:first-child){display:none}}
+
+.home-footer a{color:inherit;text-underline-offset:3px}.home-footer a:hover{color:#ebe7fa}.presenting #live-assets{display:none}

@@ -3,6 +3,23 @@ import assert from 'node:assert/strict';
 import {createPrototypeRuntime} from '../src/prototype.mjs';
 import {fromTemplate} from '../src/templates.mjs';
 import {applyOperations,exportHtml} from '../src/model.mjs';
+
+test('local filtering hides complete item layers, resets cleanly, and leaves the saved design unchanged',()=>{
+ const previousDocument=globalThis.document;globalThis.document={createElement:()=>({dataset:{},style:{setProperty(){}},append(){},setAttribute(){}})};
+ try{const r=createPrototypeRuntime(),query={id:'query',type:'input',value:''},item={id:'clip',type:'text',name:'Coast',text:'Coast arrival',filterSource:'query',filterText:'coast arrival'},parent={style:{}},d={projectId:'filter',boards:[],layers:[query,item]};r.beginFrame(d,true);r.mount(item,{parentElement:parent,append(){}});
+  r.set('query',' COAST ');assert.equal(parent.style.visibility,'');r.set('query','horizon');assert.equal(parent.style.visibility,'hidden');r.reset();assert.equal(parent.style.visibility,'');assert.equal(query.value,'');
+ }finally{globalThis.document=previousDocument;}
+});
+
+test('a text counter renders its own value and updates when a button increments it',()=>{
+ const previousDocument=globalThis.document;
+ globalThis.document={createElement:()=>({dataset:{},style:{setProperty(){}},append(){},setAttribute(){}})};
+ try{const r=createPrototypeRuntime(),counter={id:'count',type:'text',name:'Count',text:'{{value}} folders',value:3,min:0,max:100,step:1};
+  const d={projectId:'counter',boards:[],layers:[counter]};r.beginFrame(d,true);const mounted=r.mount(counter,{append(){}});assert.equal(mounted.textContent,'3 folders');
+  r.activate({action:'increment',actionTarget:'count'});assert.equal(mounted.textContent,'4 folders');
+  r.reset();assert.equal(mounted.textContent,'3 folders');r.beginFrame(d,false);assert.equal(r.mount(counter,{append(){}}).textContent,'3 folders');
+ }finally{globalThis.document=previousDocument;}
+});
 test('preview state, connected values and actions do not mutate the design',()=>{
  const doc=fromTemplate('components'),original=JSON.stringify(doc),notices=[],r=createPrototypeRuntime({onNotice:m=>notices.push(m)});
  r.beginFrame(doc,true);assert.equal(r.read('intensity'),35);r.set('intensity',71);assert.equal(r.read('intensity-progress'),71);assert.equal(r.read('intensity-label'),71);

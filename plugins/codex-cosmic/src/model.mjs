@@ -9,7 +9,12 @@ const rawLayerSchema = z.object({
   text: z.string().max(20000).default(''), fill: z.string().regex(/^(#[0-9a-fA-F]{6}|transparent)$/).default('#ffffff'),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#182022'),
   fontSize: z.number().min(6).max(400).default(24), fontWeight: z.number().min(100).max(900).default(400),
-  fontFamily: z.enum(['sans', 'serif', 'mono']).default('sans'), align: z.enum(['left','center','right']).default('left'),
+  fontFamily: z.enum(['sans', 'serif', 'mono','display','humanist']).default('sans'), align: z.enum(['left','center','right']).default('left'),
+  lineHeight:z.number().min(0).max(3).default(0),letterSpacing:z.number().min(-10).max(40).default(0),
+  borderColor:z.string().regex(/^(#[0-9a-fA-F]{6}|transparent)$/).default('transparent'),borderWidth:z.number().min(0).max(20).default(0),
+  shadow:z.enum(['none','soft','raised','deep']).default('none'),gradientTo:z.string().regex(/^(#[0-9a-fA-F]{6}|)$/).default(''),gradientAngle:z.number().min(0).max(360).default(135),
+  icon:z.enum(['none','folder','film','play','pause','plus','search','grid','list','arrow-right','chevron-right','chevron-down','upload','download','settings','star','clock','check','close','more','link','volume','image','trash','sun']).default('none'),
+  filterSource:z.string().max(100).default(''),filterText:z.string().max(1000).default(''),
   radius: z.number().min(0).max(1000).default(0), opacity: z.number().min(0).max(1).default(1),
   rotation: z.number().min(-360).max(360).default(0), assetId: z.string().max(100).optional(),
   fit: z.enum(['cover','contain']).default('cover'), locked: z.boolean().default(false), hidden: z.boolean().default(false),
@@ -57,7 +62,7 @@ export function applyOperations(input,ops) {
     switch(op.type){
       case 'patch-layer': {const i=doc.layers.findIndex(l=>l.id===op.id);if(i<0) throw Error('Unknown layer');doc.layers[i]=layerSchema.parse({...doc.layers[i],...op.patch,id:op.id});break;}
       case 'add-layer': {const layer=layerSchema.parse(op.layer);if(doc.layers.some(l=>l.id===layer.id))throw Error('Layer ID exists');doc.layers.push(layer);break;}
-      case 'delete-layer': doc.layers=doc.layers.filter(l=>l.id!==op.id).map(l=>({...l,valueSource:l.valueSource===op.id?'':l.valueSource,actionTarget:l.actionTarget===op.id?'':l.actionTarget}));break;
+      case 'delete-layer': doc.layers=doc.layers.filter(l=>l.id!==op.id).map(l=>({...l,valueSource:l.valueSource===op.id?'':l.valueSource,actionTarget:l.actionTarget===op.id?'':l.actionTarget,filterSource:l.filterSource===op.id?'':l.filterSource}));break;
       case 'reorder': {const i=doc.layers.findIndex(l=>l.id===op.id);if(i<0)throw Error('Unknown layer');const [layer]=doc.layers.splice(i,1);doc.layers.splice(Math.max(0,Math.min(doc.layers.length,Number(op.index)||0)),0,layer);break;}
       case 'patch-board': {const i=doc.boards.findIndex(b=>b.id===op.id);if(i<0)throw Error('Unknown board');doc.boards[i]=boardSchema.parse({...doc.boards[i],...op.patch,id:op.id});break;}
       case 'add-board': doc.boards.push(boardSchema.parse(op.board));break;
@@ -78,8 +83,8 @@ export function applyOperations(input,ops) {
   }
   return validateDocument(doc);
 }
-export const fonts={sans:'Arial, Helvetica, sans-serif',serif:'Georgia, serif',mono:'Consolas, monospace'};
-export function layerStyle(l){return {position:'absolute',left:`${l.x}px`,top:`${l.y}px`,width:`${l.width}px`,height:`${l.height}px`,background:l.fill,color:l.color,fontSize:`${l.fontSize}px`,fontWeight:String(l.fontWeight),fontFamily:fonts[l.fontFamily],textAlign:l.align,borderRadius:`${l.radius}px`,opacity:String(l.opacity),transform:`rotate(${l.rotation}deg)`,display:l.hidden?'none':l.type==='button'?'flex':'block',alignItems:'center',justifyContent:'center',whiteSpace:'pre-wrap',lineHeight:l.type==='text'?'1.12':'1.3',overflow:'hidden',boxSizing:'border-box'}};
+export const fonts={sans:'Inter, Segoe UI, Arial, sans-serif',serif:'Georgia, Cambria, serif',mono:'Cascadia Code, Consolas, monospace',display:'Bahnschrift, Arial Narrow, Arial, sans-serif',humanist:'Trebuchet MS, Segoe UI, sans-serif'};
+export function layerStyle(l){return {position:'absolute',left:`${l.x}px`,top:`${l.y}px`,width:`${l.width}px`,height:`${l.height}px`,background:l.gradientTo?`linear-gradient(${l.gradientAngle??135}deg,${l.fill},${l.gradientTo})`:l.fill,color:l.color,fontSize:`${l.fontSize}px`,fontWeight:String(l.fontWeight),fontFamily:fonts[l.fontFamily],textAlign:l.align,borderRadius:`${l.radius}px`,border:`${l.borderWidth||0}px solid ${l.borderColor||'transparent'}`,boxShadow:({soft:'0 2px 8px #0000000d,0 1px 2px #0000000d',raised:'0 8px 24px #00000018,0 1px 3px #00000012',deep:'0 18px 48px #00000030'})[l.shadow]||'none',letterSpacing:`${l.letterSpacing||0}px`,opacity:String(l.opacity),transform:`rotate(${l.rotation}deg)`,display:l.hidden?'none':l.type==='button'?'flex':'block',alignItems:'center',justifyContent:'center',whiteSpace:'pre-wrap',lineHeight:l.lineHeight?String(l.lineHeight):l.type==='text'?'1.12':'1.3',overflow:'hidden',boxSizing:'border-box'}};
 export function escapeHtml(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
 export function exportHtml(input){
  const doc=validateDocument(input),e=escapeHtml;

@@ -11,9 +11,11 @@ The user and Codex work on one live saved canvas. Use the plugin tools to read a
 
 Read `read_design` before editing. Preserve user edits, stable layer IDs, existing assets and other pages. Pass both `projectId` and `baseRevision` for writes. If the canvas changed, read it again and reassess the requested edit. Never silently overwrite concurrent edits.
 
-Treat a selected layer ID in a request as the editing scope. Broad redesigns can affect its containing page when the user asks for that. Put a completely new design on a new page unless replacement was requested.
+For a new design request, use `create_project` with `fresh:true` unless the user explicitly opened or identified a project to continue. Do not use the last active project as an implicit starting point. A launch-only request opens project home without creating a project. Treat a selected layer ID in an editing request as its scope; a broad redesign can affect its containing page when requested. Add pages within an explicitly opened project when the user asks for them.
 
 Use `upsert_layers` for native layers and `apply_design_operations` for boards, batches, ordering, comments and project metadata. Read [canvas format](references/canvas.md) when creating or changing a design. Do not use the saved JSON file as an alternate write path while the editor is open.
+
+For a new design or substantial redesign, read [design quality workflow](references/design-quality.md). It describes how to choose a composition for the product, use the native styling capabilities, and refine the rendered result.
 
 ## Use references deliberately
 
@@ -27,23 +29,23 @@ Read enabled `designSkills` attached to the project and apply the relevant UI/UX
 
 ## Generate and edit image assets
 
-Asset creation is part of a design request, not an optional follow-up the user must specify again. For every website, tool, UI, scene or other design, automatically assess what artwork is needed, write the asset prompts yourself, generate missing assets, prepare them, and implement them. Reuse suitable existing assets and respect requests to avoid generated imagery. Read [automatic asset workflow](references/asset-workflow.md) before generating assets or extracting a UI sheet. Continue until the generated assets are actually placed and reviewed in the user's design.
+Assess imagery for each request, but do not generate images by default. Use native elements or CSS/SVG for layouts, controls, simple icons, wordmarks and graphics when they meet the brief. Generate actual image assets when they materially improve the result: photography, distinctive artwork, detailed illustrations, textures, or a logo that needs raster artwork. A design may need no generated assets. Make this judgment yourself; the user does not need to request each image separately. When imagery is useful, author its prompts, generate it, prepare it and place it. Reuse suitable existing assets and respect requests to avoid generated imagery. Read [automatic asset workflow](references/asset-workflow.md) before generating assets or extracting a UI sheet. Continue until the generated assets are actually placed and reviewed in the user's design.
 
 Use the host's available image generation tool for genuine image creation or editing. Specify the intended asset role, composition, aspect ratio, background and invariants. For edits, view the original image first. Import the returned local image with `import_image_asset`; retain the original and then update the targeted image layer's `assetId`. A generated asset is complete only after it is imported and, when requested, placed on the canvas.
 
-The plugin's import and crop tools are not image generators. Do not substitute shapes for a requested generated image or claim an image was generated from a prompt. If image generation is unavailable, explain that boundary and keep other authorized work moving. The standalone browser's “Design + assets with Codex” button prepares a complete copyable workflow request; compatible MCP Apps hosts send it directly, and their Create action uses this workflow automatically. Browser-only Create uses the local layout runner with existing images. Never imply the standalone page can call the host image tool without this handoff.
+The plugin's import and crop tools are not image generators. Do not substitute shapes for a requested generated image or claim an image was generated from a prompt. If image generation is unavailable, explain that boundary and keep other authorized work moving. The standalone browser's “Design with imagery when useful” button prepares a complete copyable workflow request; compatible MCP Apps hosts send it directly. Browser-only Create uses the local layout runner with existing images. Never imply the standalone page can call the host image tool without this handoff.
 
 When the user sends the studio's complete design-and-assets request, it authorizes the single layout run using its selected model and effort after imagery is imported. Poll that run to completion, then inspect and refine the actual result. Do not start more design runs recursively or claim the image generator uses the layout model selector.
 
 ## Model and effort controls
 
-The studio's selectors apply to local Codex design runs through `start_design_run`; they do not change the active host conversation's model. The runner uses the existing ChatGPT sign-in, an ephemeral Codex session, a read-only sandbox and validated structured output. Start it only for a user-requested generation, with the selected model and effort. Existing account limits apply. Normally edit with plugin tools directly when already carrying out the user's design request; do not recursively launch another design run.
+The studio's selectors apply to local Codex design runs through `start_design_run`; they do not change the active host conversation's model. The runner uses the existing ChatGPT sign-in, an ephemeral Codex session, an isolated in-memory app-server session, a read-only sandbox and validated streamed output. Start it only for a user-requested generation, with the selected model and effort. Existing account limits apply. Normally edit with plugin tools directly when already carrying out the user's design request; do not recursively launch another design run.
 
 ## Show real work as it happens
 
 Call `get_studio_status` to inspect persistent runs, activity, and the current canvas revision. During a design-and-assets workflow, call `report_design_progress` before starting a meaningful stage (design, assets, canvas, review) and when it finishes or fails. Send a concise factual message, the stage, and status (`running`, `completed`, `failed`, or `waiting`); use `assetName` for artwork being generated. Never invent a percentage or claim progress for work that has not started. Image imports and native edits also create activity automatically. Place each finished asset promptly so it becomes visible on the shared canvas while other work continues.
 
-The Activity panel and asset tray show these updates live. Runs continue when a chat ends; their state survives browser refresh. A restarted server labels unfinished runs interrupted and keeps the prompt/canvas safe. Read status before retrying to avoid duplicate generation. In a standalone browser, the host-only image tool still needs the copyable request handoff; never claim the local layout runner creates bitmap images.
+The Activity panel and asset tray show these updates live. Runs continue when a chat ends; their state survives browser refresh. A restarted server labels unfinished runs interrupted and keeps the prompt/canvas safe. Validated elements appear in a live draft before completion. On failure or cancellation, the user can open that draft as a separate project. New launches show the home composer; new AI requests start with empty content. Open a saved project explicitly to refine it. Read status before retrying to avoid duplicate generation. In a standalone browser, the host-only image tool still needs the copyable request handoff; never claim the local layout runner creates bitmap images.
 
 ## Render and test the result
 

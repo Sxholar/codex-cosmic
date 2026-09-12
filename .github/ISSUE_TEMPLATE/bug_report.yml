@@ -1,0 +1,28 @@
+name: Report a problem
+description: Something in Cosmic is not working as expected.
+title: "[Bug] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Cosmic version and operating system
+      placeholder: Version from the installed plugin, Windows/macOS/Linux
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: Include the steps and any error shown in Activity.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Optional screenshot or small example

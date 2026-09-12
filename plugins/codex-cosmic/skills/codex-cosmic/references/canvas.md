@@ -32,3 +32,11 @@ Project `designSkills` is an array of `{id,name,content,enabled}`. Enabled entri
 Use `import_image_asset` for importing generated local PNG/JPEG/WebP files. Use `read_asset` to view an image. A reference link and its notes preserve design context; image references can also be passed into the local generator. Source links are not automatically captured screenshots.
 
 Design guidance was independently authored, informed by the public [Anthropic frontend design skill](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md) and [OpenAI frontend guidance](https://developers.openai.com/api/docs/guides/frontend-prompt). No private Claude Design implementation is included.
+
+## Editable finish and vector icons
+
+Layers support borderColor (hex/transparent), borderWidth (0–20), shadow (none/soft/raised/deep), gradientTo (hex or empty), gradientAngle (0–360), lineHeight (0 for the default, or .8–3), and letterSpacing (-10–40 pixels). Font families also include display and humanist, using local fallback stacks. These fields render identically in the editor and HTML export.
+
+Use icon on a shape or button for consistent native vector symbols: folder, film, play, pause, plus, search, grid, list, arrow-right, chevron-right, chevron-down, upload, download, settings, star, clock, check, close, more, link, volume, image, trash, sun; none disables it. A transparent shape with icon is a standalone vector mark.
+
+Text/button {{value}} can display its own starting value, or read a valueSource. For local filtering, filterSource points to a search input and filterText contains item keywords. Put these fields on every layer belonging to an item; nonmatches hide without reflow. Explain prototype limitations in the accompanying response, not inside the product interface.

@@ -1,0 +1,23 @@
+name: Share design feedback
+description: Help improve the quality of generated designs and iteration.
+title: "[Design feedback] "
+body:
+  - type: textarea
+    id: brief
+    attributes:
+      label: What were you trying to design?
+      description: Include the prompt and model/effort selection if useful.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What worked, and what needs improvement?
+      description: Examples include composition, typography, imagery, interaction, or following your edits.
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Optional screenshot or reference
+      description: Show the result and the specific qualities you wanted.
